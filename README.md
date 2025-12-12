@@ -52,6 +52,35 @@ Here’s only way I am aware of to generate one:
 
 ## Running with Docker Compose
 
+### With prebuild iamge
+
+Available images are:
+- linux/amd64
+- linux/arm64
+- linux/arm/v7
+
+Example `docker-compose.yml` :
+
+```yaml
+  technitium_exporter:
+    image: ghcr.io/guycalledseven/technitium-dns-prometheus-exporter:latest
+    container_name: technitium_exporter
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    environment:
+      TECHNITIUM_BASE_URL: http://technitium:5380
+      TECHNITIUM_TOKEN: your-api-token-here
+      SERVER_LABEL: technitium
+      TECHNITIUM_STATS_RANGE: LastHour
+      TECHNITIUM_TOP_LIMIT: 50
+      EXPORTER_PORT: 9105
+    ports:
+      - "9105:9105"
+```
+
+### With local git checked out project
+
 Example `docker-compose.yml` for local git checkout:
 
 ```yaml
@@ -77,7 +106,7 @@ services:
     restart: unless-stopped
 ```
 
-Prometheus scrape config:
+### Prometheus scrape config:
 
 ```yaml
 scrape_configs:
