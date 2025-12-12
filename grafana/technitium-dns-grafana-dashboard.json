@@ -3,10 +3,61 @@
     {
       "name": "DS_PROMETHEUS",
       "label": "Prometheus",
-      "description": "Select your Prometheus datasource",
+      "description": "",
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
+    }
+  ],
+  "__elements": {},
+  "__requires": [
+    {
+      "type": "panel",
+      "id": "bargauge",
+      "name": "Bar gauge",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "gauge",
+      "name": "Gauge",
+      "version": ""
+    },
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "12.3.0"
+    },
+    {
+      "type": "panel",
+      "id": "piechart",
+      "name": "Pie chart",
+      "version": ""
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "table",
+      "name": "Table",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "timeseries",
+      "name": "Time series",
+      "version": ""
     }
   ],
   "annotations": {
@@ -29,7 +80,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 0,
+  "id": null,
   "links": [],
   "panels": [
     {
@@ -1651,7 +1702,7 @@
               "__name__": true,
               "instance": true,
               "job": true,
-			  "server": true
+              "server": true
             },
             "includeByName": {},
             "indexByName": {},
@@ -1980,7 +2031,7 @@
   "preload": false,
   "refresh": "10s",
   "schemaVersion": 42,
-    "tags": [
+  "tags": [
     "prometheus",
     "technitium",
     "dns"
@@ -1989,8 +2040,9 @@
     "list": [
       {
         "current": {
-          "text": "Prometheus",
-          "value": "prometheus-datasource"
+          "text": "",
+          "value": "${DS_PROMETHEUS}",
+          "selected": true
         },
         "label": "Datasource",
         "name": "DS_PROMETHEUS",
@@ -2000,10 +2052,7 @@
         "type": "datasource"
       },
       {
-        "current": {
-          "text": "",
-          "value": ""
-        },
+        "current": {},
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
@@ -2037,5 +2086,6 @@
   "timezone": "",
   "title": "Technitium DNS Exporter",
   "uid": "technitium-dns",
-  "version": 17
+  "version": 11,
+  "weekStart": ""
 }
