@@ -11,7 +11,7 @@ Inspired by [pihole-exporter](https://github.com/eko/pihole-exporter) and [Pi-ho
 - DNS traffic metrics reflect Technitium’s current dashboard statistics window (e.g. `LastHour`), not lifetime counters. Zone and DHCP metrics reflect current server state at scrape time.
 - Logging is explicit on API failures
 - Metric cardinality is intentionally bounded
-- Suitable for home labs and small/medium installations. Use of python over golang comes from the need for a quick and easy to understand solution without the need to define specific golang structs for Technitium DNS API output, which could change and would break strict golang exporter.
+- Suitable for home labs and small/medium installations. Use of python over golang comes from the need for a quick and easy to understand solution without the need to define specific golang structs for each Technitium DNS API output, which could change any time and break strict golang exporter.
 
 ---
 
@@ -23,6 +23,7 @@ All configuration is done via environment variables.
 | Variable | Description | Default |
 |--------|-------------|---------|
 | `TECHNITIUM_BASE_URL` | Base URL of Technitium DNS API | `http://technitium:5380` |
+| `TECHNITIUM_VERIFY_SSL` | SSL Verification (set to "false" if using self-signed certs) | `true` |
 | `TECHNITIUM_TOKEN` | **Required** API token | _(none)_ |
 | `TECHNITIUM_STATS_RANGE` | Stats window (The duration type for which valid values are: `LastHour`, `LastDay`, `LastWeek`, `LastMonth`, `LastYear`, `Custom`. ) | `LastHour` |
 | `TECHNITIUM_TOP_LIMIT` | Number of entries in Top lists | `50` |
@@ -70,6 +71,8 @@ Example `docker-compose.yml` :
     restart: unless-stopped
     environment:
       TECHNITIUM_BASE_URL: http://technitium:5380
+      # TECHNITIUM_BASE_URL: http://technitium::53443
+      # TECHNITIUM_VERIFY_SSL: false
       TECHNITIUM_TOKEN: your-api-token-here
       SERVER_LABEL: technitium
       TECHNITIUM_STATS_RANGE: LastHour

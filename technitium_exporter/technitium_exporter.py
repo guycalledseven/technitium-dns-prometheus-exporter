@@ -2,11 +2,12 @@
 import logging
 import os
 import time
-from typing import Any, Dict, Iterator, List, Optional
-
+from typing import Any, Dict, Iterator, Optional
 import requests
+import urllib3
 from prometheus_client import core, start_http_server
 from prometheus_client.core import GaugeMetricFamily, InfoMetricFamily
+from prometheus_client.registry import Collector
 
 # ---------------------------------------------------------------------------
 # Config
@@ -16,24 +17,36 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("technitium_exporter")
 
-TECHNITIUM_BASE_URL = os.getenv("TECHNITIUM_BASE_URL", "http://technitium:5380").rstrip("/")
+TECHNITIUM_BASE_URL = os.getenv("TECHNITIUM_BASE_URL", "http://technitium:5380").rstrip(
+    "/"
+)
 TECHNITIUM_TOKEN = os.getenv("TECHNITIUM_TOKEN", "")
 TECHNITIUM_STATS_RANGE = os.getenv("TECHNITIUM_STATS_RANGE", "LastHour")
 TECHNITIUM_TOP_LIMIT = int(os.getenv("TECHNITIUM_TOP_LIMIT", "50"))
 EXPORTER_PORT = int(os.getenv("EXPORTER_PORT", "9105"))
+TECHNITIUM_VERIFY_SSL = os.getenv("TECHNITIUM_VERIFY_SSL", "true").lower() == "true"
 
 # Optional: For identifying this specific Technitium instance in Grafana
 SERVER_LABEL = os.getenv("SERVER_LABEL", "technitium")
 # Optional: If using Technitium Clustering, specify which node to query
 TECHNITIUM_NODE = os.getenv("TECHNITIUM_NODE", "")
 
+# Suppress insecure request warnings if SSL verify is disabled
+if not TECHNITIUM_VERIFY_SSL:
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-class TechnitiumCollector:
+
+# Inherit from Collector to satisfy type-checker
+class TechnitiumCollector(Collector):
     def __init__(self):
         self.session = requests.Session()
-        self.session.headers.update({"User-Agent": "TechnitiumPrometheusExporter/2.3"})
+        self.session.headers.update({"User-Agent": "TechnitiumPrometheusExporter/2.4"})
+        # Apply SSL verification setting globally to the session
+        self.session.verify = TECHNITIUM_VERIFY_SSL
 
-    def _call_api(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _call_api(
+        self, endpoint: str, params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """Generic helper to handle API calls and errors."""
         url = f"{TECHNITIUM_BASE_URL}{endpoint}"
         default_params = {"token": TECHNITIUM_TOKEN}
@@ -50,11 +63,16 @@ class TechnitiumCollector:
             resp.raise_for_status()
             data = resp.json()
             if data.get("status") != "ok":
-                logger.error("Technitium API returned non-ok status for %s: %r", endpoint, data)
+                logger.error("Technitium API returned non-ok status for %s", endpoint)
                 return {}
             return data.get("response", {})
         except Exception as e:
-            logger.error("Request Failed [%s]: %s", endpoint, e)
+            # Sanitize the token from the error message
+            error_msg = str(e)
+            if TECHNITIUM_TOKEN and len(TECHNITIUM_TOKEN) > 0:
+                error_msg = error_msg.replace(TECHNITIUM_TOKEN, "REDACTED")
+
+            logger.error("Request Failed [%s]: %s", endpoint, error_msg)
             return {}
 
     def collect(self) -> Iterator[core.Metric]:
@@ -70,7 +88,9 @@ class TechnitiumCollector:
         stats = stats_data.get("stats", {})
 
         # UP Metric
-        g_up = GaugeMetricFamily("technitium_up", "Technitium API reachable", labels=["server"])
+        g_up = GaugeMetricFamily(
+            "technitium_up", "Technitium API reachable", labels=["server"]
+        )
         g_up.add_metric([SERVER_LABEL], 1.0 if stats else 0.0)
         yield g_up
 
@@ -86,7 +106,9 @@ class TechnitiumCollector:
                 "technitium_dns_blocklist_zones": "blockListZones",
             }
             for metric, key in simple_map.items():
-                g = GaugeMetricFamily(metric, f"From Dashboard Stats: {key}", labels=["server"])
+                g = GaugeMetricFamily(
+                    metric, f"From Dashboard Stats: {key}", labels=["server"]
+                )
                 g.add_metric([SERVER_LABEL], float(stats.get(key, 0)))
                 yield g
 
@@ -157,7 +179,9 @@ class TechnitiumCollector:
         # -------------------------------------------------------------------
         # 2. Zone Health
         # -------------------------------------------------------------------
-        zones_data = self._call_api("/api/zones/list", {"pageNumber": 1, "pageSize": 1000})
+        zones_data = self._call_api(
+            "/api/zones/list", {"pageNumber": 1, "pageSize": 1000}
+        )
         zones_list = zones_data.get("zones", [])
         if zones_list:
             z_info = InfoMetricFamily(
@@ -179,12 +203,11 @@ class TechnitiumCollector:
             yield z_info
 
         # -------------------------------------------------------------------
-        # 3. DHCP Stats (real metrics from leases)
+        # 3. DHCP Stats
         # -------------------------------------------------------------------
         dhcp_leases_data = self._call_api("/api/dhcp/leases/list")
         leases = dhcp_leases_data.get("leases", [])
         if leases:
-            # Count leases per scope and type
             counts: Dict[str, Dict[str, int]] = {}
             for lease in leases:
                 scope = lease.get("scope", "unknown")
@@ -210,9 +233,24 @@ class TechnitiumCollector:
         # 4. Top Stats
         # -------------------------------------------------------------------
         for stats_type, metric_name, labels, json_key in [
-            ("TopClients", "technitium_dns_top_client_hits", ["server", "client_ip", "client_name"], "topClients"),
-            ("TopDomains", "technitium_dns_top_domain_hits", ["server", "domain"], "topDomains"),
-            ("TopBlockedDomains", "technitium_dns_top_blocked_domain_hits", ["server", "domain"], "topBlockedDomains"),
+            (
+                "TopClients",
+                "technitium_dns_top_client_hits",
+                ["server", "client_ip", "client_name"],
+                "topClients",
+            ),
+            (
+                "TopDomains",
+                "technitium_dns_top_domain_hits",
+                ["server", "domain"],
+                "topDomains",
+            ),
+            (
+                "TopBlockedDomains",
+                "technitium_dns_top_blocked_domain_hits",
+                ["server", "domain"],
+                "topBlockedDomains",
+            ),
         ]:
             try:
                 data = self._call_api(
@@ -221,16 +259,26 @@ class TechnitiumCollector:
                 )
                 items = data.get(json_key, [])
                 if items:
-                    m = GaugeMetricFamily(metric_name, f"Hits for {stats_type}", labels=labels)
+                    m = GaugeMetricFamily(
+                        metric_name, f"Hits for {stats_type}", labels=labels
+                    )
                     for item in items:
                         if stats_type == "TopClients":
-                            l_vals = [SERVER_LABEL, item.get("name", ""), item.get("domain", "")]
+                            l_vals = [
+                                SERVER_LABEL,
+                                item.get("name", ""),
+                                item.get("domain", ""),
+                            ]
                         else:
                             l_vals = [SERVER_LABEL, item.get("name", "")]
                         m.add_metric(l_vals, float(item.get("hits", 0)))
                     yield m
             except Exception as e:
-                logger.error("Failed to scrape %s: %s", stats_type, e)
+                # Token redacting logic
+                error_msg = str(e)
+                if TECHNITIUM_TOKEN and len(TECHNITIUM_TOKEN) > 0:
+                    error_msg = error_msg.replace(TECHNITIUM_TOKEN, "REDACTED")
+                logger.error("Failed to scrape %s: %s", stats_type, error_msg)
 
         # -------------------------------------------------------------------
         # 5. Scrape Duration
