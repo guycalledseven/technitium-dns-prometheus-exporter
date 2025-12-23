@@ -71,7 +71,7 @@ Example `docker-compose.yml` :
     restart: unless-stopped
     environment:
       TECHNITIUM_BASE_URL: http://technitium:5380
-      # TECHNITIUM_BASE_URL: http://technitium::53443
+      # TECHNITIUM_BASE_URL: https://technitium::53443
       # TECHNITIUM_VERIFY_SSL: false
       TECHNITIUM_TOKEN: your-api-token-here
       SERVER_LABEL: technitium
