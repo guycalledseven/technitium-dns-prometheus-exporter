@@ -15,7 +15,7 @@ from prometheus_client.registry import Collector
 # printed at startup.
 # ---------------------------------------------------------------------------
 
-EXPORTER_VERSION = "2.1.0"
+EXPORTER_VERSION = "2.2.0"
 
 # ---------------------------------------------------------------------------
 # Config

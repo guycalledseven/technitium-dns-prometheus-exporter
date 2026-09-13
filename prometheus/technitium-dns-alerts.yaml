@@ -140,7 +140,7 @@ groups:
     interval: 1m
     rules:
 
-      # Needs exporter >= 2.1.0 and Technitium >= 15.3: the technitium_health
+      # Needs exporter >= 2.2.0 and Technitium >= 15.3: the technitium_health
       # metric comes from /api/dnsClient/healthCheck, which proves actual DNS
       # resolution (without creating query log entries). On older setups the
       # series simply doesn't exist and this rule never fires.

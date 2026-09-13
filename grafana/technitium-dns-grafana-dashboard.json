@@ -184,7 +184,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "DNS resolution health via /api/dnsClient/healthCheck (1 = server resolves queries). Stronger signal than API Status: a server with a dead port 53 still shows API Up. Requires Technitium >= 15.3 and exporter >= 2.1.0; shows n/a on older versions.",
+      "description": "DNS resolution health via /api/dnsClient/healthCheck (1 = server resolves queries). Stronger signal than API Status: a server with a dead port 53 still shows API Up. Requires Technitium >= 15.3 and exporter >= 2.2.0; shows n/a on older versions.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -266,7 +266,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Technitium DNS server version (the controller's, in cluster mode). From /api/user/session/get; requires exporter >= 2.1.0.",
+      "description": "Technitium DNS server version (the controller's, in cluster mode). From /api/user/session/get; requires exporter >= 2.2.0.",
       "fieldConfig": {
         "defaults": {
           "color": {

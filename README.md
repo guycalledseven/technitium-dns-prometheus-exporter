@@ -318,7 +318,7 @@ dropped
 - Rate‑limited client metrics
 - Optional caching layer to reduce API calls?
 
-### Updates in v2.1.0
+### Updates in v2.2.0
 - **`technitium_health`** — per-server DNS resolution health via Technitium 15.3's `/api/dnsClient/healthCheck` (no query log pollution; auto-skipped on older versions). Configurable via `TECHNITIUM_HEALTHCHECK*` env vars.
 - **`technitium_server_info`** — server version and cluster info from `/api/user/session/get`
 - **Prometheus alerting rules** — curated rule set in `prometheus/technitium-dns-alerts.yaml` with cluster-aware per-node coverage (see [Alerting rules](#alerting-rules))
@@ -345,7 +345,7 @@ A curated set of alerting rules ships in [`prometheus/technitium-dns-alerts.yaml
 | `TechnitiumRealtimeMetricsMissing` | critical | Realtime lifetime counters vanish fleet-wide while the API still answers |
 | `TechnitiumRealtimeMetricsMissingOnNode` | critical | A single server's realtime counters go missing while its API answers — catches per-node failures in **cluster mode** that the fleet-wide rule can't see |
 | `TechnitiumExporterScrapeSlow` | warning | Scrape duration exceeds 5 s for 15 min (halfway to the default scrape timeout) |
-| `TechnitiumResolutionFailing` | critical | The health check reports a server can't resolve DNS (Technitium ≥ 15.3, exporter ≥ 2.1.0) |
+| `TechnitiumResolutionFailing` | critical | The health check reports a server can't resolve DNS (Technitium ≥ 15.3, exporter ≥ 2.2.0) |
 | `TechnitiumNoQueries` | critical | A server answers the API but serves zero DNS queries for 30 min |
 | `TechnitiumHighServfailRate` | critical | More than 3% of queries SERVFAIL for 10 min (guarded against post-restart spikes) |
 | `TechnitiumBlockListCollapsed` | warning | Block list drops below half its 7-day peak |
