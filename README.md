@@ -1,6 +1,6 @@
 # Technitium DNS Prometheus Exporter
 
-A lightweight [Prometheus](https://github.com/prometheus/prometheus) exporter for [Technitium DNS Server](https://technitium.com/dns/) ([github](https://github.com/TechnitiumSoftware/DnsServer)) that exposes dashboard, DNS, zone, DHCP, and top‑query statistics for **single servers or clusters**. Includes an [accompanying dashboard](https://grafana.com/grafana/dashboards/24555-technitium-dns-exporter/) for visualization in [Grafana](https://grafana.com/).
+A lightweight [Prometheus](https://github.com/prometheus/prometheus) exporter for [Technitium DNS Server](https://technitium.com/dns/) ([github](https://github.com/TechnitiumSoftware/DnsServer)) that exposes dashboard, DNS, zone, DHCP, and top‑query statistics for **single servers or clusters**. Includes an [accompanying dashboard](https://grafana.com/grafana/dashboards/24555-technitium-dns-exporter/) for visualization in [Grafana](https://grafana.com/) and a ready-made set of [Prometheus alerting rules](prometheus/technitium-dns-alerts.yaml).
 
 
 
@@ -144,6 +144,7 @@ scrape_configs:
 ```
 
 ---
+
 
 ## Features
 
@@ -314,6 +315,64 @@ dropped
 ### Updates in v2.0.0
 - **Realtime lifetime metrics** — `technitium_dns_realtime_queries_total`, `technitium_realtime_uptime_seconds`, `technitium_realtime_start_time_seconds` from `/api/dashboard/metrics/text`
 - **Realtime Grafana panels** — QPS, cache hit %, block %, uptime, lifetime clients in a dedicated dashboard row
+
+
+## Alerting rules
+
+A curated set of alerting rules ships in [`prometheus/technitium-dns-alerts.yaml`](prometheus/technitium-dns-alerts.yaml). Load it into Prometheus via `rule_files:` (see below), **or** import the same file into Grafana-managed alerting (*Alerting → Alert rules → Import to Grafana-managed rules*, Grafana 12+) — pick one, not both, or every alert evaluates and fires twice.
+
+### What's in it
+
+| Alert | Severity | Fires when |
+|---|---|---|
+| `TechnitiumExporterDown` | critical | Prometheus can't scrape the exporter for 5 min |
+| `TechnitiumTargetMissing` | critical | No `technitium.*` scrape target exists in Prometheus at all |
+| `TechnitiumApiUnreachable` | critical | Exporter runs, but the Technitium API stops answering for a server |
+| `TechnitiumRealtimeMetricsMissing` | critical | Realtime lifetime counters vanish fleet-wide while the API still answers |
+| `TechnitiumRealtimeMetricsMissingOnNode` | critical | A single server's realtime counters go missing while its API answers — catches per-node failures in **cluster mode** that the fleet-wide rule can't see |
+| `TechnitiumExporterScrapeSlow` | warning | Scrape duration exceeds 5 s for 15 min (halfway to the default scrape timeout) |
+| `TechnitiumNoQueries` | critical | A server answers the API but serves zero DNS queries for 30 min |
+| `TechnitiumHighServfailRate` | critical | More than 3% of queries SERVFAIL for 10 min (guarded against post-restart spikes) |
+| `TechnitiumBlockListCollapsed` | warning | Block list drops below half its 7-day peak |
+| `TechnitiumBlockListShrinking` | info | Block list sits 10–50% below its 7-day peak for 6 h |
+
+### Before enabling 
+
+Check:
+
+1. **Job name.** Every rule matches `job=~"technitium.*"`. If your scrape job is named differently, adjust either the job or the rules.
+2. **One exporter per job.** Aggregations use `by (job, server)`. If several exporter instances share one job name, add `instance` to every `by (...)` clause or the rules will collapse them into each other.
+
+### Installing
+
+Copy the file next to your `prometheus.yml` and reference it:
+
+```yaml
+rule_files:
+  - 'technitium-dns-alerts.yaml'
+```
+
+Then reload Prometheus — either restart it, or if it runs with `--web.enable-lifecycle`:
+
+```bash
+curl -X POST http://localhost:9090/-/reload
+```
+
+Verify the three groups (`technitium-availability`, `technitium-resolution`, `technitium-blocking`) appear under `http://localhost:9090/rules`. You can validate the file beforehand without installing anything:
+
+```bash
+docker run --rm --entrypoint /bin/promtool \
+  -v "$PWD/prometheus/technitium-dns-alerts.yaml:/rules.yaml:ro" \
+  prom/prometheus:latest check rules /rules.yaml
+```
+
+### Notes
+
+- Rules alone don't notify anyone: pair Prometheus with an Alertmanager, or use Grafana-managed alerting with a contact point.
+- Each rule carries a custom `action` annotation with concrete first debugging steps. Default notification templates don't render it — add `{{ .Annotations.action }}` to yours.
+- Requires Prometheus ≥ 2.42 (the file uses `keep_firing_for`).
+
+---
 
 
 ## Accompanying Grafana dashboard

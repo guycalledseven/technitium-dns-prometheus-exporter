@@ -90,6 +90,32 @@ groups:
             upgrade that renamed the counters. That endpoint is documented as
             experimental and 15.1 already renamed every one of them once.
 
+      # Per-server companion to the rule above. absent_over_time() only fires
+      # when EVERY server's series is gone; if a single cluster node's
+      # /api/dashboard/metrics/text fails while the others keep answering, the
+      # series set is non-empty and absent_over_time() stays silent. This rule
+      # catches exactly that: a server whose API answers (technitium_up == 1)
+      # but whose realtime counters stopped showing up in the same scrape.
+      - alert: TechnitiumRealtimeMetricsMissingOnNode
+        expr: technitium_up{job=~"technitium.*"} == 1 unless on (job, server) technitium_dns_realtime_queries_total{category="all",job=~"technitium.*"}
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Realtime query counters missing for {{ $labels.server }}"
+          description: >-
+            The API answers for {{ $labels.server }}, but its
+            technitium_dns_realtime_queries_total series has been absent from
+            the exporter's output for 15 minutes. The SERVFAIL and no-queries
+            alerts are blind for this server while this fires. Other cluster
+            nodes may still be reporting fine, which is why the fleet-wide
+            absence rule above stays silent.
+          action: >-
+            grep the exporter log for "Realtime metrics request failed" naming
+            this node. The usual causes are the same as the fleet-wide rule:
+            an unreachable /api/dashboard/metrics/text on that node, or a
+            token account that lost Dashboard: View there.
+
       - alert: TechnitiumExporterScrapeSlow
         expr: technitium_scrape_duration_seconds{job=~"technitium.*"} > 5
         for: 15m
