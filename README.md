@@ -37,6 +37,9 @@ All configuration is done via environment variables.
 | `LOG_LEVEL` | Logging level | `INFO` |
 | `SERVER_LABEL` | **Single Mode:** Custom label for the server tag in Grafana. | `technitium` |
 | `TECHNITIUM_NODES` | **Cluster Mode:** Comma-separated list of node names to scrape (optional). | _(unset)_ |
+| `TECHNITIUM_HEALTHCHECK` | Enable the `technitium_health` resolution check (needs Technitium ≥ 15.3 and `DnsClient: View` permission; auto-skipped on older versions). | `true` |
+| `TECHNITIUM_HEALTHCHECK_DOMAIN` | Domain the health check resolves. `localhost` tests self-resolution; a real name tests the full recursion path. | `localhost` |
+| `TECHNITIUM_HEALTHCHECK_TYPE` | Record type for the health check query. | `A` |
 
 ### Deployment Modes
 
@@ -70,7 +73,7 @@ Here’s only way I am aware of to generate one:
 - Open your Technitium instance in a browser.
 - Navigate to Administration > Groups and create a group named “read-only”.
 - Now create a user named “readonly” and make it a member of "read-only" group.
-- Go to Administration > Permissions and verify that Everyone has read-only access to everything.
+- Go to Administration > Permissions and verify that Everyone has read-only access to everything. The group needs **DnsClient: View** for the `technitium_health` resolution check metric to work.
 - Go to Zones > select zone > Permissions, 
   - In Group Permissions > add group "read-only", Assign View permission to "read-only" group and click Save
   - Repeat for all Zones you wish to export
@@ -226,8 +229,12 @@ Use these for:
 Exporter + API health:
 
 - `technitium_up{server}` — API reachability (0/1)
+- `technitium_health{server}` — actual DNS resolution health (0/1) via `/api/dnsClient/healthCheck`; doesn't create query log entries. Only exported on Technitium ≥ 15.3.
+- `technitium_server_info{version, cluster_initialized, cluster_domain}` — server version and cluster info (the controller's, in cluster mode)
 - `technitium_stats_range_info{server, range}` — configured stats window (e.g. LastHour, LastDay)
-- `technitium_scrape_duration_seconds{server}` — exporter scrape duration
+- `technitium_scrape_duration_seconds` — exporter scrape duration (one value per exporter, covers all nodes; no `server` label)
+
+> **Why `technitium_health` exists when there's already `technitium_up`:** they answer different questions. Prometheus' own `up` proves the *exporter* is scrapeable; `technitium_up` proves the *management API* answers — but a DNS server whose port 53 is dead, firewalled, or misconfigured passes both. `technitium_health` closes that gap by asking Technitium to actually resolve a query (per node, in cluster mode). Before 15.3 the only way to detect this was inference — "the API is up but query counters stopped moving" — which needs 30 minutes of silence to be trustworthy. The health check turns that into a direct yes/no within one scrape, and unlike probing port 53 yourself, it doesn't pollute the query logs and top-client stats with monitoring noise.
 
 Python client process metrics:
 
@@ -239,7 +246,9 @@ Python client process metrics:
 ### Core Health
 
 - `technitium_up{server}`
-- `technitium_scrape_duration_seconds{server}`
+- `technitium_health{server}`
+- `technitium_server_info{version, cluster_initialized, cluster_domain}`
+- `technitium_scrape_duration_seconds`
 
 ### DNS Queries (Window Snapshot)
 
@@ -309,6 +318,11 @@ dropped
 - Rate‑limited client metrics
 - Optional caching layer to reduce API calls?
 
+### Updates in v2.1.0
+- **`technitium_health`** — per-server DNS resolution health via Technitium 15.3's `/api/dnsClient/healthCheck` (no query log pollution; auto-skipped on older versions). Configurable via `TECHNITIUM_HEALTHCHECK*` env vars.
+- **`technitium_server_info`** — server version and cluster info from `/api/user/session/get`
+- **Prometheus alerting rules** — curated rule set in `prometheus/technitium-dns-alerts.yaml` with cluster-aware per-node coverage (see [Alerting rules](#alerting-rules))
+
 ### Updates in v2.0.1
 - Update of realtime metric names for Technitium DNS v15.1 ([changelog](https://github.com/TechnitiumSoftware/DnsServer/blob/master/CHANGELOG.md#version-151))
 
@@ -331,6 +345,7 @@ A curated set of alerting rules ships in [`prometheus/technitium-dns-alerts.yaml
 | `TechnitiumRealtimeMetricsMissing` | critical | Realtime lifetime counters vanish fleet-wide while the API still answers |
 | `TechnitiumRealtimeMetricsMissingOnNode` | critical | A single server's realtime counters go missing while its API answers — catches per-node failures in **cluster mode** that the fleet-wide rule can't see |
 | `TechnitiumExporterScrapeSlow` | warning | Scrape duration exceeds 5 s for 15 min (halfway to the default scrape timeout) |
+| `TechnitiumResolutionFailing` | critical | The health check reports a server can't resolve DNS (Technitium ≥ 15.3, exporter ≥ 2.1.0) |
 | `TechnitiumNoQueries` | critical | A server answers the API but serves zero DNS queries for 30 min |
 | `TechnitiumHighServfailRate` | critical | More than 3% of queries SERVFAIL for 10 min (guarded against post-restart spikes) |
 | `TechnitiumBlockListCollapsed` | warning | Block list drops below half its 7-day peak |

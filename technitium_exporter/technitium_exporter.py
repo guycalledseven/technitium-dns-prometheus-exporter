@@ -10,6 +10,14 @@ from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily, InfoM
 from prometheus_client.registry import Collector
 
 # ---------------------------------------------------------------------------
+# Version — bump on every release, together with the "Updates in vX.Y.Z"
+# section in README.md. Sent as the User-Agent to the Technitium API and
+# printed at startup.
+# ---------------------------------------------------------------------------
+
+EXPORTER_VERSION = "2.1.0"
+
+# ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
@@ -37,6 +45,15 @@ TECHNITIUM_NODES = (
 # Fallback for single server setups using the old env var
 SERVER_LABEL_DEFAULT = os.getenv("SERVER_LABEL", "technitium")
 
+# Health check via /api/dnsClient/healthCheck (Technitium >= 15.3).
+# Proves actual DNS resolution without creating query log entries.
+# Requires the token account to hold the "DnsClient: View" permission.
+TECHNITIUM_HEALTHCHECK = os.getenv("TECHNITIUM_HEALTHCHECK", "true").lower() == "true"
+TECHNITIUM_HEALTHCHECK_DOMAIN = os.getenv("TECHNITIUM_HEALTHCHECK_DOMAIN", "localhost")
+TECHNITIUM_HEALTHCHECK_TYPE = os.getenv("TECHNITIUM_HEALTHCHECK_TYPE", "A")
+
+HEALTHCHECK_MIN_VERSION = (15, 3)
+
 if not TECHNITIUM_VERIFY_SSL:
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -44,15 +61,28 @@ if not TECHNITIUM_VERIFY_SSL:
 class TechnitiumCollector(Collector):
     def __init__(self):
         self.session = requests.Session()
-        self.session.headers.update({"User-Agent": "TechnitiumPrometheusExporter/2.5"})
+        self.session.headers.update(
+            {"User-Agent": f"TechnitiumPrometheusExporter/{EXPORTER_VERSION}"}
+        )
         self.session.verify = TECHNITIUM_VERIFY_SSL
+        self._healthcheck_skip_logged = False
 
-    def _call_api(
+    @staticmethod
+    def _parse_version(version: str) -> Optional[tuple]:
+        try:
+            return tuple(int(p) for p in version.split(".")[:2])
+        except (ValueError, AttributeError):
+            return None
+
+    def _call_api_raw(
         self,
         endpoint: str,
         node: Optional[str],
         params: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        # Returns the full JSON document. Some endpoints (session/get,
+        # dnsClient/healthCheck) put their payload at the top level instead of
+        # inside the usual "response" wrapper.
         url = f"{TECHNITIUM_BASE_URL}{endpoint}"
         default_params = {"token": TECHNITIUM_TOKEN}
 
@@ -66,13 +96,7 @@ class TechnitiumCollector(Collector):
         try:
             resp = self.session.get(url, params=default_params, timeout=10)
             resp.raise_for_status()
-            data = resp.json()
-            if data.get("status") != "ok":
-                logger.error(
-                    f"Error from node '{node or 'local'}': {data.get('errorMessage')}"
-                )
-                return {}
-            return data.get("response", {})
+            return resp.json()
         except Exception as e:
             error_msg = (
                 str(e).replace(TECHNITIUM_TOKEN, "REDACTED")
@@ -83,6 +107,22 @@ class TechnitiumCollector(Collector):
                 f"Request Failed [{node or 'local'} - {endpoint}]: {error_msg}"
             )
             return {}
+
+    def _call_api(
+        self,
+        endpoint: str,
+        node: Optional[str],
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        data = self._call_api_raw(endpoint, node, params)
+        if not data:
+            return {}
+        if data.get("status") != "ok":
+            logger.error(
+                f"Error from node '{node or 'local'}': {data.get('errorMessage')}"
+            )
+            return {}
+        return data.get("response", {})
 
     def _fetch_metrics_text(self, node: Optional[str]) -> str:
         url = f"{TECHNITIUM_BASE_URL}/api/dashboard/metrics/text"
@@ -132,6 +172,18 @@ class TechnitiumCollector(Collector):
         # Prepare Metric Families (We create them once, then populate with samples from all nodes)
         g_up = GaugeMetricFamily(
             "technitium_up", "Technitium API reachable", labels=["server"]
+        )
+        g_health = GaugeMetricFamily(
+            "technitium_health",
+            "DNS resolution health check via /api/dnsClient/healthCheck "
+            "(1 = server resolves queries; requires Technitium >= 15.3 and "
+            "the DnsClient: View permission)",
+            labels=["server"],
+        )
+        server_info = InfoMetricFamily(
+            "technitium_server",
+            "Technitium DNS server version and cluster info "
+            "(controller's, from /api/user/session/get)",
         )
         stats_range_info = InfoMetricFamily(
             "technitium_stats_range",
@@ -241,10 +293,61 @@ class TechnitiumCollector(Collector):
             "dropped_total": "dropped",
         }
 
+        # Session info: server version + cluster details. One call per scrape,
+        # answered by the controller (the endpoint has no node parameter).
+        session_data = self._call_api_raw("/api/user/session/get", None)
+        info = session_data.get("info") or {}
+        version = self._parse_version(info.get("version", ""))
+        if info:
+            server_info.add_metric(
+                [],
+                {
+                    "version": str(info.get("version", "")),
+                    "cluster_initialized": str(
+                        info.get("clusterInitialized", False)
+                    ).lower(),
+                    "cluster_domain": str(info.get("clusterDomain", "")),
+                },
+            )
+
+        # Health check needs 15.3+; skip quietly (logged once) below that or
+        # when the version can't be determined.
+        healthcheck_active = (
+            TECHNITIUM_HEALTHCHECK
+            and version is not None
+            and version >= HEALTHCHECK_MIN_VERSION
+        )
+        if TECHNITIUM_HEALTHCHECK and not healthcheck_active:
+            if not self._healthcheck_skip_logged:
+                logger.warning(
+                    "Skipping health check metric: Technitium version is "
+                    f"{info.get('version') or 'unknown'}, need >= "
+                    f"{'.'.join(map(str, HEALTHCHECK_MIN_VERSION))}."
+                )
+                self._healthcheck_skip_logged = True
+
         # Loop through every node (or the single local instance)
         for node in targets:
             # If node is None, use default label. If node is string, use it as the label.
             server_label = node if node else SERVER_LABEL_DEFAULT
+
+            # 0. Health Check (does not create query log entries)
+            if healthcheck_active:
+                hc = self._call_api_raw(
+                    "/api/dnsClient/healthCheck",
+                    node,
+                    {
+                        "domain": TECHNITIUM_HEALTHCHECK_DOMAIN,
+                        "type": TECHNITIUM_HEALTHCHECK_TYPE,
+                    },
+                )
+                healthy = hc.get("status") == "ok"
+                if hc and not healthy:
+                    logger.error(
+                        f"Health check failed [{server_label}]: "
+                        f"{hc.get('errorMessage')}"
+                    )
+                g_health.add_metric([server_label], 1.0 if healthy else 0.0)
 
             # 1. Dashboard Stats
             stats_data = self._call_api(
@@ -388,6 +491,8 @@ class TechnitiumCollector(Collector):
 
         # Yield all collected metrics
         yield g_up
+        yield g_health
+        yield server_info
         yield stats_range_info
         for m in g_families.values():
             yield m
@@ -419,11 +524,11 @@ if __name__ == "__main__":
 
     if TECHNITIUM_NODES:
         logger.info(
-            f"Starting Cluster Exporter on port {EXPORTER_PORT}. Monitoring nodes: {TECHNITIUM_NODES}"
+            f"Starting Cluster Exporter v{EXPORTER_VERSION} on port {EXPORTER_PORT}. Monitoring nodes: {TECHNITIUM_NODES}"
         )
     else:
         logger.info(
-            f"Starting Single-Server Exporter on port {EXPORTER_PORT}. Label: {SERVER_LABEL_DEFAULT}"
+            f"Starting Single-Server Exporter v{EXPORTER_VERSION} on port {EXPORTER_PORT}. Label: {SERVER_LABEL_DEFAULT}"
         )
 
     core.REGISTRY.register(TechnitiumCollector())

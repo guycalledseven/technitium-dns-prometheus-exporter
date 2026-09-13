@@ -140,6 +140,30 @@ groups:
     interval: 1m
     rules:
 
+      # Needs exporter >= 2.1.0 and Technitium >= 15.3: the technitium_health
+      # metric comes from /api/dnsClient/healthCheck, which proves actual DNS
+      # resolution (without creating query log entries). On older setups the
+      # series simply doesn't exist and this rule never fires.
+      - alert: TechnitiumResolutionFailing
+        expr: technitium_health{job=~"technitium.*"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DNS resolution health check failing on {{ $labels.server }}"
+          description: >-
+            The API answers, but /api/dnsClient/healthCheck reports that
+            {{ $labels.server }} cannot resolve its health-check domain
+            (TECHNITIUM_HEALTHCHECK_DOMAIN, default "localhost"). This is a
+            direct resolution failure, not an inference from query counters.
+          action: >-
+            Run `dig @<server> <health-check domain>` to confirm. If the
+            health-check domain is a real name, test recursion and upstreams;
+            if it is "localhost", the server can't even resolve its own
+            built-in zones. A permanently-zero series can also mean the token
+            account lost the DnsClient: View permission — the exporter log
+            will name the error.
+
       - alert: TechnitiumNoQueries
         expr: sum by (job, server) (rate(technitium_dns_realtime_queries_total{category="all",job=~"technitium.*"}[15m])) == 0
         for: 15m
